@@ -42,26 +42,13 @@
             종목일별프로그램 CSV 다운로더
           </h1>
           <p class="text-xs text-slate-400 mt-1">
-            stk_base.csv 기반 자동 조율 및 데이터 추출
+            동일 폴더의 stk_base.csv 기반 자동 조율 및 데이터 추출
           </p>
         </div>
       </div>
 
       <!-- Main Content Body -->
       <div class="p-6 space-y-6">
-        <!-- File Input Option -->
-        <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-700 space-y-2">
-          <label class="block text-xs font-semibold text-slate-300">
-            1. <code class="text-amber-400">stk_base.csv</code> 파일 선택 (선택 안 할 시 서버 경로에서 자동 탐색)
-          </label>
-          <input
-            type="file"
-            id="csvFileInput"
-            accept=".csv"
-            class="block w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
-          />
-        </div>
-
         <!-- Execution Button -->
         <div>
           <button
@@ -116,7 +103,8 @@
             class="h-60 overflow-y-auto space-y-1.5 text-[11px] leading-relaxed"
           >
             <div class="text-slate-500">
-              'stk_base.csv' 파일을 선택하거나 서버 경로에서 자동 탐색하여 조회를 진행합니다.
+              '종목일별프로그램 CSV 다운로드' 버튼을 누르면 `./stk_base.csv`
+              파일에서 종목코드를 불러와 자동 조회를 진행합니다.
             </div>
           </div>
         </div>
@@ -128,9 +116,11 @@
       // Initialize Lucide Icons
       lucide.createIcons();
 
+      // Fixed rate-limiting delay (1000ms)
       const FIXED_DELAY_MS = 1000;
       const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+      // Utility: Get YYYYMMDD Format
       function getFormattedDate() {
         const today = new Date();
         const year = today.getFullYear();
@@ -139,6 +129,7 @@
         return `${year}${month}${day}`;
       }
 
+      // Terminal Logging Function
       function log(msg, type = "info") {
         const logArea = document.getElementById("logArea");
         const entry = document.createElement("div");
@@ -160,39 +151,37 @@
         document.getElementById("logArea").innerHTML = "";
       }
 
-      // 1순위: 파일 선택창에서 읽기 / 2순위: fetch('./stk_base.csv')
+      // Fetch and parse stk_base.csv from same folder
       async function loadStkBaseCSV() {
-        const fileInput = document.getElementById("csvFileInput");
-        
-        if (fileInput.files && fileInput.files.length > 0) {
-          const file = fileInput.files[0];
-          log(`업로드된 파일 [${file.name}] 읽는 중...`);
-          const text = await file.text();
-          const stockCodes = parseStkBaseCSV(text);
-          if (stockCodes.length === 0) throw new Error("유효한 종목코드를 추출하지 못했습니다.");
-          log(` -> 파일 읽기 완료: 총 ${stockCodes.length}개 종목코드 추출됨.`, "success");
-          return stockCodes;
-        }
-
-        log("`./stk_base.csv` 서버 파일 읽는 중...");
+        log("`./stk_base.csv` 파일 읽는 중...");
         try {
           const response = await fetch("./stk_base.csv", { cache: "no-cache" });
           if (!response.ok) {
-            throw new Error(`stk_base.csv 파일이 없습니다. (상태 코드: ${response.status})`);
+            throw new Error(
+              `stk_base.csv 파일을 찾을 수 없습니다. (상태 코드: ${response.status})`,
+            );
           }
           const text = await response.text();
           const stockCodes = parseStkBaseCSV(text);
 
-          if (stockCodes.length === 0) throw new Error("유효한 종목코드를 추출하지 못했습니다.");
+          if (stockCodes.length === 0) {
+            throw new Error(
+              "stk_base.csv 내에서 유효한 종목코드를 추출하지 못했습니다.",
+            );
+          }
 
-          log(` -> 파일 읽기 완료: 총 ${stockCodes.length}개 종목코드 추출됨.`, "success");
+          log(
+            ` -> \`./stk_base.csv\` 읽기 완료: 총 ${stockCodes.length}개 종목코드 추출됨. (${stockCodes.join(", ")})`,
+            "success",
+          );
           return stockCodes;
         } catch (err) {
           log(` -> stk_base.csv 로드 실패: ${err.message}`, "error");
-          throw new Error("stk_base.csv 파일을 직접 선택하거나 서버에 업로드해주세요.");
+          throw err;
         }
       }
 
+      // Extract raw stock codes preserving original formats like "005930_AL"
       function parseStkBaseCSV(csvText) {
         const lines = csvText.split(/\r?\n/);
         const stockCodes = [];
@@ -208,14 +197,22 @@
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i].trim();
           if (!line) continue;
+
+          // Skip header row
           if (i === 0 && stkCdColIdx !== -1) continue;
 
           const cols = line
             .split(",")
             .map((c) => c.trim().replace(/^["']|["']$/g, ""));
 
-          let rawCode = (stkCdColIdx !== -1 && cols[stkCdColIdx]) ? cols[stkCdColIdx] : cols[0];
+          let rawCode = "";
+          if (stkCdColIdx !== -1 && cols[stkCdColIdx]) {
+            rawCode = cols[stkCdColIdx];
+          } else if (cols.length > 0) {
+            rawCode = cols[0];
+          }
 
+          // _AL 서픽스를 포함해 원본 코드 형태 그대로 유지
           if (rawCode && !stockCodes.includes(rawCode)) {
             stockCodes.push(rawCode);
           }
@@ -224,24 +221,37 @@
         return stockCodes;
       }
 
+      // 1. Access Token Request (fn_au10001)
       async function fn_au10001(data) {
         const host = "https://mockapi.kiwoom.com";
         const endpoint = "/oauth2/token";
         const url = host + endpoint;
+
+        const headers = {
+          "Content-Type": "application/json;charset=UTF-8",
+        };
 
         log("1. 접근토큰 발급 요청 중...");
 
         try {
           const response = await fetch(url, {
             method: "POST",
-            headers: { "Content-Type": "application/json;charset=UTF-8" },
+            headers: headers,
             body: JSON.stringify(data),
           });
 
           const responseBody = await response.json();
+
           const code = responseBody.return_code;
-          if (code !== undefined && code !== 0 && code !== "0" && code !== "0000") {
-            throw new Error(responseBody.return_msg || responseBody.msg || "토큰 발급 실패");
+          if (
+            code !== undefined &&
+            code !== 0 &&
+            code !== "0" &&
+            code !== "0000"
+          ) {
+            throw new Error(
+              responseBody.return_msg || responseBody.msg || "토큰 발급 실패",
+            );
           }
 
           const token = responseBody.access_token || responseBody.token;
@@ -249,14 +259,16 @@
             log(" -> 접근토큰 발급 성공!", "success");
             return token;
           } else {
-            throw new Error("Access Token이 존재하지 않습니다.");
+            throw new Error("응답 바디에 Access Token이 없습니다.");
           }
         } catch (error) {
+          console.error("요청 실패:", error);
           log(` -> 토큰 발급 실패: ${error.message}`, "error");
           throw error;
         }
       }
 
+      // 2. Program Trading TR Request (fn_ka90013)
       async function fn_ka90013(token, data, cont_yn = "N", next_key = "") {
         const host = "https://mockapi.kiwoom.com";
         const endpoint = "/api/dostk/mrkcond";
@@ -277,26 +289,56 @@
             body: JSON.stringify(data),
           });
 
-          const resContYn = response.headers.get("cont-yn") || response.headers.get("Cont-Yn") || "N";
-          const resNextKey = response.headers.get("next-key") || response.headers.get("Next-Key") || "";
+          const resContYn =
+            response.headers.get("cont-yn") ||
+            response.headers.get("Cont-Yn") ||
+            "N";
+          const resNextKey =
+            response.headers.get("next-key") ||
+            response.headers.get("Next-Key") ||
+            "";
+
           const responseBody = await response.json();
 
           const code = responseBody.return_code;
-          if (code !== undefined && code !== 0 && code !== "0" && code !== "0000") {
-            throw new Error(responseBody.return_msg || responseBody.msg || "TR 데이터 조회 실패");
+          if (
+            code !== undefined &&
+            code !== 0 &&
+            code !== "0" &&
+            code !== "0000"
+          ) {
+            throw new Error(
+              responseBody.return_msg ||
+                responseBody.msg ||
+                "TR 데이터 조회 실패",
+            );
           }
 
-          return { body: responseBody, contYn: resContYn, nextKey: resNextKey };
+          return {
+            body: responseBody,
+            contYn: resContYn,
+            nextKey: resNextKey,
+          };
         } catch (error) {
+          console.error("요청 실패:", error);
           log(` -> TR 요청 실패: ${error.message}`, "error");
           throw error;
         }
       }
 
+      // Collect data sequentially per stock code
       async function collectProgramData(token, stk_cd, searchDate) {
-        log(`\n--- [종목코드: ${stk_cd} (조회일자: ${searchDate})] 수집 시작 ---`, "warn");
+        log(
+          `\n--- [종목코드: ${stk_cd} (조회일자: ${searchDate})] 수집 시작 ---`,
+          "warn",
+        );
 
-        const baseTrParams = { stk_cd: stk_cd, amt_qty_tp: "2", dt: searchDate };
+        const baseTrParams = {
+          stk_cd: stk_cd,
+          amt_qty_tp: "2", // 1:금액, 2:수량
+          dt: searchDate,
+        };
+
         let stockProgramList = [];
         let contYn = "N";
         let nextKey = "";
@@ -305,32 +347,42 @@
         while (true) {
           log(`[${stk_cd}] 데이터 요청 중... (${page}번째 페이지)`);
           const result = await fn_ka90013(token, baseTrParams, contYn, nextKey);
-          const pageList = result.body.stk_daly_prm_trde_trnsn || [];
 
+          const pageList = result.body.stk_daly_prm_trde_trnsn || [];
+          
+          // 원본 종목코드(stk_cd)를 응답 항목 데이터에 바인딩
           const formattedList = pageList.map((item) => ({
             ...item,
             stk_cd: item.stk_cd || stk_cd,
           }));
 
           stockProgramList = stockProgramList.concat(formattedList);
-          log(` -> [${stk_cd}] ${page}페이지 수신완료: ${pageList.length}건 (누적: ${stockProgramList.length}건)`, "success");
+
+          log(
+            ` -> [${stk_cd}] ${page}페이지 수신완료: ${pageList.length}건 (누적: ${stockProgramList.length}건)`,
+            "success",
+          );
 
           contYn = result.contYn;
           nextKey = result.nextKey;
 
           if (contYn !== "Y" || !nextKey) {
-            log(` -> [${stk_cd}] 추가 데이터가 없어 조회를 완료합니다.`, "info");
+            log(
+              ` -> [${stk_cd}] 추가 데이터가 없으므로 조회를 완료합니다.`,
+              "info",
+            );
             break;
           }
 
           page++;
-          log(` -> 1초 대기 후 다음 연속조회를 실행합니다...`);
+          log(` -> 1초 대기 후 [${stk_cd}] 다음 연속조회를 실행합니다...`);
           await delay(FIXED_DELAY_MS);
         }
 
         return stockProgramList;
       }
 
+      // 마이너스/부호 중복 정제 함수 (e.g., "--151071" -> "-151071")
       function cleanQuantityValue(val) {
         if (!val) return "";
         let strVal = String(val).trim();
@@ -339,6 +391,7 @@
         return isNegative ? `-${cleanDigits}` : cleanDigits;
       }
 
+      // Create and Download Consolidated CSV
       function createAndDownloadCSV(dataList) {
         log("\nCSV 변환 및 다운로드 실행 중...");
 
@@ -355,8 +408,11 @@
           csvRows.push(row.join(","));
         });
 
+        // UTF-8 BOM for Excel Korean encoding compatibility
         const csvContent = "\uFEFF" + csvRows.join("\r\n");
-        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const blob = new Blob([csvContent], {
+          type: "text/csv;charset=utf-8;",
+        });
 
         const fileName = `${getFormattedDate()}_종목일별프로그램.csv`;
         const url = URL.createObjectURL(blob);
@@ -369,9 +425,13 @@
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
 
-        log(` -> 통합 CSV 다운로드 완료: [${fileName}] (총 ${dataList.length}건)`, "success");
+        log(
+          ` -> 통합 CSV 다운로드 완료: [${fileName}] (총 ${dataList.length}건)`,
+          "success",
+        );
       }
 
+      // Main Workflow
       async function executeWorkflow() {
         const btn = document.getElementById("runBtn");
         const badge = document.getElementById("statusBadge");
@@ -382,11 +442,13 @@
 
         btn.disabled = true;
         badge.textContent = "처리 중";
-        badge.className = "px-2 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium";
+        badge.className =
+          "px-2 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium";
 
         resetLog();
 
         try {
+          // 1. Fetch and parse stock codes from ./stk_base.csv
           const stockCodes = await loadStkBaseCSV();
 
           progressContainer.classList.remove("hidden");
@@ -396,6 +458,7 @@
 
           await delay(500);
 
+          // 2. Kiwoom OAuth Token Request
           const authParams = {
             grant_type: "client_credentials",
             appkey: "6C5DEgrFBmeUtnQ6dwYFazZ_Aa3Tdia3agcS6rTkmic",
@@ -408,15 +471,23 @@
           let totalList = [];
           const totalCodes = stockCodes.length;
 
+          // 3. Sequential data collection per stock code
           for (let index = 0; index < totalCodes; index++) {
             const stk_cd = stockCodes[index];
             const currentStep = index + 1;
 
-            log(` -> [${currentStep}/${totalCodes}] 종목 [${stk_cd}] 수집 진행 중...`);
+            log(
+              ` -> [${currentStep}/${totalCodes}] 종목 [${stk_cd}] 수집 진행 중...`,
+            );
 
-            const stockData = await collectProgramData(token, stk_cd, searchDate);
+            const stockData = await collectProgramData(
+              token,
+              stk_cd,
+              searchDate,
+            );
             totalList = totalList.concat(stockData);
 
+            // Progress UI update
             const percent = Math.round((currentStep / totalCodes) * 100);
             progressBar.style.width = `${percent}%`;
             progressText.textContent = `진행률: ${currentStep} / ${totalCodes} (현재: ${stk_cd})`;
@@ -428,22 +499,29 @@
             }
           }
 
+          // 4. Final Aggregated CSV Export
           if (totalList.length > 0) {
-            log(`\n전체 수집 완료: 총 ${totalList.length}건 수집됨.`, "success");
+            log(
+              `\n전체 수집 완료: 총 ${totalList.length}건 수집됨.`,
+              "success",
+            );
             await delay(500);
 
             createAndDownloadCSV(totalList);
             badge.textContent = "완료";
-            badge.className = "px-2 py-0.5 text-[10px] rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium";
+            badge.className =
+              "px-2 py-0.5 text-[10px] rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium";
           } else {
             log(" -> 수집된 데이터가 존재하지 않습니다.", "warn");
             badge.textContent = "데이터 없음";
-            badge.className = "px-2 py-0.5 text-[10px] rounded bg-slate-800 text-slate-400 border border-slate-700";
+            badge.className =
+              "px-2 py-0.5 text-[10px] rounded bg-slate-800 text-slate-400 border border-slate-700";
           }
         } catch (err) {
           log(`오류 발생: ${err.message}`, "error");
           badge.textContent = "오류";
-          badge.className = "px-2 py-0.5 text-[10px] rounded bg-red-500/20 text-red-300 border border-red-500/30 font-medium";
+          badge.className =
+            "px-2 py-0.5 text-[10px] rounded bg-red-500/20 text-red-300 border border-red-500/30 font-medium";
         } finally {
           btn.disabled = false;
         }
