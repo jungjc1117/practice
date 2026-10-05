@@ -355,7 +355,14 @@
           const result = await fn_ka90013(token, baseTrParams, contYn, nextKey);
 
           const pageList = result.body.stk_daly_prm_trde_trnsn || [];
-          stockProgramList = stockProgramList.concat(pageList);
+          
+          // [수정 포인트 1] 각 응답 항목에 호출할 때 사용했던 stk_cd를 명시적으로 삽입
+          const formattedList = pageList.map((item) => ({
+            ...item,
+            stk_cd: item.stk_cd || stk_cd,
+          }));
+
+          stockProgramList = stockProgramList.concat(formattedList);
 
           log(
             ` -> [${stk_cd}] ${page}페이지 수신완료: ${pageList.length}건 (누적: ${stockProgramList.length}건)`,
@@ -381,6 +388,16 @@
         return stockProgramList;
       }
 
+      // [수정 포인트 2] 마이너스/부호 중복 제거 함수 (e.g., "--151071" -> "-151071")
+      function cleanQuantityValue(val) {
+        if (!val) return "";
+        let strVal = String(val).trim();
+        const isNegative = strVal.includes("-");
+        // 숫자 정수 표현만 추출
+        const cleanDigits = strVal.replace(/[^0-9]/g, "");
+        return isNegative ? `-${cleanDigits}` : cleanDigits;
+      }
+
       // Create and Download Consolidated CSV
       function createAndDownloadCSV(dataList) {
         log("\nCSV 변환 및 다운로드 실행 중...");
@@ -389,10 +406,11 @@
         let csvRows = [headers.join(",")];
 
         dataList.forEach((item) => {
+          const cleanQty = cleanQuantityValue(item.prm_netprps_qty);
           const row = [
             `"${(item.dt || "").replace(/"/g, '""')}"`,
             `"${(item.stk_cd || "").replace(/"/g, '""')}"`,
-            `"${(item.prm_netprps_qty || "").replace(/"/g, '""')}"`,
+            `"${cleanQty.replace(/"/g, '""')}"`,
           ];
           csvRows.push(row.join(","));
         });
