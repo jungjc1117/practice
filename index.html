@@ -181,7 +181,7 @@
         }
       }
 
-      // Extract and clean stock codes from CSV text (handles suffixes like "005930_AL")
+      // Extract raw stock codes preserving original formats like "005930_AL"
       function parseStkBaseCSV(csvText) {
         const lines = csvText.split(/\r?\n/);
         const stockCodes = [];
@@ -212,15 +212,9 @@
             rawCode = cols[0];
           }
 
-          if (rawCode) {
-            // Extract the leading 6 digits (e.g. "005930_AL" -> "005930")
-            const match = rawCode.match(/^(\d{6})/);
-            if (match) {
-              const cleanedCode = match[1];
-              if (!stockCodes.includes(cleanedCode)) {
-                stockCodes.push(cleanedCode);
-              }
-            }
+          // _AL 서픽스를 포함해 원본 코드 형태 그대로 유지
+          if (rawCode && !stockCodes.includes(rawCode)) {
+            stockCodes.push(rawCode);
           }
         }
 
@@ -356,7 +350,7 @@
 
           const pageList = result.body.stk_daly_prm_trde_trnsn || [];
           
-          // [수정 포인트 1] 각 응답 항목에 호출할 때 사용했던 stk_cd를 명시적으로 삽입
+          // 원본 종목코드(stk_cd)를 응답 항목 데이터에 바인딩
           const formattedList = pageList.map((item) => ({
             ...item,
             stk_cd: item.stk_cd || stk_cd,
@@ -388,12 +382,11 @@
         return stockProgramList;
       }
 
-      // [수정 포인트 2] 마이너스/부호 중복 제거 함수 (e.g., "--151071" -> "-151071")
+      // 마이너스/부호 중복 정제 함수 (e.g., "--151071" -> "-151071")
       function cleanQuantityValue(val) {
         if (!val) return "";
         let strVal = String(val).trim();
         const isNegative = strVal.includes("-");
-        // 숫자 정수 표현만 추출
         const cleanDigits = strVal.replace(/[^0-9]/g, "");
         return isNegative ? `-${cleanDigits}` : cleanDigits;
       }
