@@ -158,8 +158,10 @@
       // 페이지 로드 시 시작일자(금년 1월 1일), 종료일자(오늘) 기본 세팅
       const today = new Date();
       const firstDayOfYear = new Date(today.getFullYear(), 0, 1);
-      document.getElementById("searchStartDateInput").value = getFormattedDate(firstDayOfYear);
-      document.getElementById("searchEndDateInput").value = getFormattedDate(today);
+      document.getElementById("searchStartDateInput").value =
+        getFormattedDate(firstDayOfYear);
+      document.getElementById("searchEndDateInput").value =
+        getFormattedDate(today);
 
       // Fixed rate-limiting delay (1000ms)
       const FIXED_DELAY_MS = 1000;
@@ -374,7 +376,7 @@
           amt_qty_tp: "2", // 1:금액, 2:수량
           strt_dt: startDate,
           end_dt: endDate,
-          dt: endDate // 대화형 단일 일자 조회 파라미터 호환성 대비
+          dt: endDate, // 대화형 단일 일자 조회 파라미터 호환성 대비
         };
 
         let stockDbrtList = [];
@@ -440,13 +442,9 @@
         dataList.forEach((item) => {
           const dtVal = (item.dt || "").replace(/"/g, '""');
           const stkCdVal = (item.stk_cd || "").replace(/"/g, '""');
-          const dbrtVal = (item.dbrt_trde_irds).replace(/"/g, '""');
+          const dbrtVal = item.dbrt_trde_irds.replace(/"/g, '""');
 
-          const row = [
-            `"${dtVal}"`,
-            `"${stkCdVal}"`,
-            `"${dbrtVal}"`,
-          ];
+          const row = [`"${dtVal}"`, `"${stkCdVal}"`, `"${dbrtVal}"`];
           csvRows.push(row.join(","));
         });
 
@@ -482,11 +480,15 @@
         const progressText = document.getElementById("progressText");
         const progressPercent = document.getElementById("progressPercent");
 
-        const startDateInput = document.getElementById("searchStartDateInput").value.trim();
-        const endDateInput = document.getElementById("searchEndDateInput").value.trim();
+        const startDateInput = document
+          .getElementById("searchStartDateInput")
+          .value.trim();
+        const endDateInput = document
+          .getElementById("searchEndDateInput")
+          .value.trim();
 
         // 날짜 유효성 검사 (8자리 숫자)
-        if (!/^\d{8}$/.test(startDateInput) \vert{}\vert{} !/^\d{8}$/.test(endDateInput)) {
+        if (!/^\d{8}$/.test(startDateInput) || !/^\d{8}$/.test(endDateInput)) {
           alert("조회 일자를 YYYYMMDD 형태의 8자리 숫자로 입력해주세요.");
           return;
         }
@@ -535,7 +537,12 @@
               ` -> [${currentStep}/${totalCodes}] 종목 [${stk_cd}] 수집 진행 중...`,
             );
 
-            const stockData = await collectDbrtData(token, stk_cd, startDateInput, endDateInput);
+            const stockData = await collectDbrtData(
+              token,
+              stk_cd,
+              startDateInput,
+              endDateInput,
+            );
             totalList = totalList.concat(stockData);
 
             // Progress UI update
