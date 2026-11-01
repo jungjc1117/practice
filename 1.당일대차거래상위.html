@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>키움증권 당일대차거래상위 (코스피/코스닥) CSV 다운로드</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+      body {
+        font-family:
+          "Inter",
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+      }
+    </style>
+  </head>
+  <body
+    class="bg-slate-900 text-slate-100 min-h-screen flex items-center justify-center p-4"
+  >
+    <!-- Main Container -->
+    <div
+      class="max-w-xl w-full bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl overflow-hidden"
+    >
+      <!-- Header -->
+      <div
+        class="bg-slate-800/80 p-6 border-b border-slate-700 flex items-center space-x-4"
+      >
+        <div
+          class="p-3 bg-red-600/20 border border-red-500/30 rounded-xl text-red-500"
+        >
+          <i data-lucide="file-spread-sheet" class="w-8 h-8"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold text-white">
+            당일대차거래상위 CSV 다운로더
+          </h1>
+          <p class="text-xs text-slate-400 mt-1">
+            최근 거래일 자동 탐색 (오늘 → 전일 → 전전일...) 및 CSV 추출
+          </p>
+        </div>
+      </div>
+
+      <!-- Main Content Body -->
+      <div class="p-6 space-y-6">
+        <!-- Execution Button -->
+        <div>
+          <button
+            id="runBtn"
+            onclick="executeWorkflow()"
+            class="w-full py-4 px-6 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 active:scale-[0.99] text-white font-bold text-base rounded-xl shadow-lg shadow-red-900/30 transition-all flex items-center justify-center space-x-3 cursor-pointer"
+          >
+            <i data-lucide="download" class="w-5 h-5"></i>
+            <span>최신 당일대차거래상위 CSV 다운로드</span>
+          </button>
+        </div>
+
+        <!-- Log / Status Box -->
+        <div
+          class="bg-slate-950 rounded-xl border border-slate-800 p-4 font-mono text-xs text-slate-300"
+        >
+          <div
+            class="flex items-center justify-between pb-2 mb-2 border-b border-slate-800"
+          >
+            <span
+              class="text-slate-400 font-semibold flex items-center space-x-2"
+            >
+              <i data-lucide="terminal" class="w-4 h-4 text-emerald-400"></i>
+              <span>실행 상태 로그</span>
+            </span>
+            <span
+              id="statusBadge"
+              class="px-2 py-0.5 text-[10px] rounded bg-slate-800 text-slate-400"
+              >대기 중</span
+            >
+          </div>
+          <div
+            id="logArea"
+            class="h-64 overflow-y-auto space-y-1.5 text-[11px] leading-relaxed"
+          >
+            <div class="text-slate-500">
+              버튼을 누르면 오늘 날짜부터 최근 유효 거래일을 자동으로 찾아
+              수집합니다.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script>
+      // Lucide Icons Initialization
+      lucide.createIcons();
+
+      // 헬퍼: 딜레이 함수 (밀리초)
+      const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      // 날짜 계산 헬퍼: baseDate 객체 기준 offsetDays(-1, -2 등)일 날짜를 YYYYMMDD로 반환
+      function getOffsetDateStr(offsetDays = 0) {
+        const d = new Date();
+        d.setDate(d.getDate() - offsetDays);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${year}${month}${day}`;
+      }
+
+      // Safe integer conversion helper (부호 포함)
+      function toSafeInt(val) {
+        if (val === undefined || val === null) return 0;
+        const cleanStr = String(val).replace(/[^0-9-]/g, "");
+        const parsed = parseInt(cleanStr, 10);
+        return isNaN(parsed) ? 0 : parsed;
+      }
+
+      // Logging Function
+      function log(msg, type = "info") {
+        const logArea = document.getElementById("logArea");
+        const entry = document.createElement("div");
+        const now = new Date().toLocaleTimeString();
+
+        let color = "text-slate-300";
+        if (type === "error") color = "text-red-400 font-semibold";
+        if (type === "success") color = "text-emerald-400 font-semibold";
+        if (type === "warn") color = "text-amber-400";
+
+        entry.className = color;
+        entry.innerHTML = `<span class="text-slate-600">[${now}]</span> ${msg}`;
+        logArea.appendChild(entry);
+        logArea.scrollTop = logArea.scrollHeight;
+        console.log(msg);
+      }
+
+      function resetLog() {
+        document.getElementById("logArea").innerHTML = "";
+      }
+
+      // 1. 접근토큰 발급 (fn_au10001)
+      async function fn_au10001(data) {
+        const host = "https://mockapi.kiwoom.com";
+        const endpoint = "/oauth2/token";
+        const url = host + endpoint;
+
+        const headers = {
+          "Content-Type": "application/json;charset=UTF-8",
+        };
+
+        log("1. 접근토큰 발급 요청 중...");
+
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify(data),
+          });
+
+          const responseBody = await response.json();
+
+          const code = responseBody.return_code;
+          if (
+            code !== undefined &&
+            code !== 0 &&
+            code !== "0" &&
+            code !== "0000"
+          ) {
+            throw new Error(
+              responseBody.return_msg || responseBody.msg || "토큰 발급 실패",
+            );
+          }
+
+          const token = responseBody.access_token || responseBody.token;
+          if (token) {
+            log(" -> 접근토큰 발급 성공!", "success");
+            return token;
+          } else {
+            throw new Error("응답 바디에 Access Token이 없습니다.");
+          }
+        } catch (error) {
+          console.error("요청 실패:", error);
+          log(` -> 토큰 발급 실패: ${error.message}`, "error");
+          throw error;
+        }
+      }
+
+      // 2. 당일대차거래상위요청 (fn_ka90012)
+      async function fn_ka90012(token, data, cont_yn = "N", next_key = "") {
+        const host = "https://mockapi.kiwoom.com";
+        const endpoint = "/api/dostk/slb";
+        const url = host + endpoint;
+
+        const headers = {
+          "Content-Type": "application/json;charset=UTF-8",
+          authorization: `Bearer ${token}`,
+          "cont-yn": cont_yn,
+          "next-key": next_key,
+          "api-id": "ka90012",
+        };
+
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify(data),
+          });
+
+          const resContYn =
+            response.headers.get("cont-yn") ||
+            response.headers.get("Cont-Yn") ||
+            "N";
+          const resNextKey =
+            response.headers.get("next-key") ||
+            response.headers.get("Next-Key") ||
+            "";
+
+          const responseBody = await response.json();
+
+          const code = responseBody.return_code;
+          if (
+            code !== undefined &&
+            code !== 0 &&
+            code !== "0" &&
+            code !== "0000"
+          ) {
+            throw new Error(
+              responseBody.return_msg ||
+                responseBody.msg ||
+                "TR 데이터 조회 실패",
+            );
+          }
+
+          return {
+            body: responseBody,
+            contYn: resContYn,
+            nextKey: resNextKey,
+          };
+        } catch (error) {
+          console.error("요청 실패:", error);
+          log(` -> TR 요청 실패: ${error.message}`, "error");
+          throw error;
+        }
+      }
+
+      // 시장별(코스피 / 코스닥) 연속조회 수집 함수 (유량 제한 1.2초 반영)
+      async function collectMarketData(
+        token,
+        mrktTpCode,
+        mrktLabel,
+        searchDate,
+      ) {
+        log(
+          `[${mrktLabel.toUpperCase()} (${mrktTpCode})] 수집 조회 중... (일자: ${searchDate})`,
+          "info",
+        );
+
+        const baseTrParams = {
+          mrkt_tp: mrktTpCode,
+          dt: searchDate,
+        };
+
+        let marketDataList = [];
+        let contYn = "N";
+        let nextKey = "";
+        let page = 1;
+
+        while (true) {
+          await delay(1200);
+
+          const result = await fn_ka90012(token, baseTrParams, contYn, nextKey);
+          const pageList = result.body.dbrt_trde_prps || [];
+
+          const processedList = pageList.map((item) => ({
+            ...item,
+            dt: item.dt || searchDate,
+            mrkt_tp: mrktLabel,
+          }));
+
+          marketDataList = marketDataList.concat(processedList);
+
+          contYn = result.contYn;
+          nextKey = result.nextKey;
+
+          if (contYn !== "Y" || !nextKey) {
+            break;
+          }
+
+          page++;
+        }
+
+        return marketDataList;
+      }
+
+      // 3. CSV 생성 및 다운로드 함수
+      function createAndDownloadCSV(dataList, validDate) {
+        log("\nCSV 변환 및 다운로드 실행 중...");
+
+        const headers = ["dt", "mrkt_tp", "stk_cd", "net_cntr_qty"];
+        let csvRows = [headers.join(",")];
+
+        dataList.forEach((item) => {
+          const rawDt = item.dt || validDate;
+          const dt = `"${String(rawDt).replace(/"/g, '""')}"`;
+          const mrkt_tp = `"${item.mrkt_tp.replace(/"/g, '""')}"`;
+          const stk_cd = `"${item.stk_cd.replace(/"/g, '""')}"`;
+
+          const dbrt_trde_cntrcnt = Math.abs(toSafeInt(item.dbrt_trde_cntrcnt));
+          const dbrt_trde_rpy = Math.abs(toSafeInt(item.dbrt_trde_rpy));
+          const netQty = dbrt_trde_cntrcnt - dbrt_trde_rpy;
+
+          const row = [dt, mrkt_tp, stk_cd, netQty];
+          csvRows.push(row.join(","));
+        });
+
+        const csvContent = "\uFEFF" + csvRows.join("\r\n");
+        const blob = new Blob([csvContent], {
+          type: "text/csv;charset=utf-8;",
+        });
+
+        const fileName = `${validDate}_당일대차거래상위.csv`;
+        const url = URL.createObjectURL(blob);
+
+        const link = document.createElement("a");
+        link.href = url;
+        link.setAttribute("download", fileName);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        log(
+          ` -> 통합 CSV 다운로드 완료: [${fileName}] (총 ${dataList.length}건)`,
+          "success",
+        );
+      }
+
+      // 실행 통합 워크플로우
+      async function executeWorkflow() {
+        const btn = document.getElementById("runBtn");
+        const badge = document.getElementById("statusBadge");
+
+        btn.disabled = true;
+        btn.classList.add("opacity-50", "cursor-not-allowed");
+        badge.textContent = "처리 중";
+        badge.className =
+          "px-2 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-300 font-medium";
+
+        resetLog();
+
+        try {
+          await delay(500);
+
+          const authParams = {
+            grant_type: "client_credentials",
+            appkey: "6C5DEgrFBmeUtnQ6dwYFazZ_Aa3Tdia3agcS6rTkmic",
+            secretkey: "xl5sKBl168QCieYJHAW7IgI-aefHGlD4txRCts-__CM",
+          };
+
+          const token = await fn_au10001(authParams);
+
+          let totalList = [];
+          let validDate = "";
+          const MAX_RETRIES = 10;
+
+          log("\n--- 거래 데이터 자동 탐색 시작 (최대 10일) ---", "warn");
+
+          for (let offset = 0; offset < MAX_RETRIES; offset++) {
+            const searchDate = getOffsetDateStr(offset);
+            log(`\n🔍 [시도 ${offset + 1}] 조회 일자 테스트: ${searchDate}`);
+
+            // 1. 코스피 수집
+            const kospiData = await collectMarketData(
+              token,
+              "P00101",
+              "k",
+              searchDate,
+            );
+
+            await delay(1200);
+
+            // 2. 코스닥 수집
+            const kosdaqData = await collectMarketData(
+              token,
+              "P10102",
+              "q",
+              searchDate,
+            );
+
+            const currentData = kospiData.concat(kosdaqData);
+
+            if (currentData.length > 0) {
+              totalList = currentData;
+              validDate = searchDate;
+              log(
+                ` -> 🎉 유효 거래일 발견 [${searchDate}]: 코스피 ${kospiData.length}건 / 코스닥 ${kosdaqData.length}건 (총 ${totalList.length}건)`,
+                "success",
+              );
+              break;
+            } else {
+              log(
+                ` -> [${searchDate}] 데이터 0건 (휴일/장마감 전). 이전 날짜로 재시도합니다...`,
+                "warn",
+              );
+              await delay(1200);
+            }
+          }
+
+          if (totalList.length > 0) {
+            await delay(500);
+            createAndDownloadCSV(totalList, validDate);
+            badge.textContent = "완료";
+            badge.className =
+              "px-2 py-0.5 text-[10px] rounded bg-emerald-500/20 text-emerald-300 font-medium";
+          } else {
+            log(
+              " -> 최근 10일 이내에 수집된 데이터가 존재하지 않습니다.",
+              "error",
+            );
+            badge.textContent = "데이터 없음";
+            badge.className =
+              "px-2 py-0.5 text-[10px] rounded bg-slate-800 text-slate-400";
+          }
+        } catch (err) {
+          log(`오류가 발생했습니다: ${err.message}`, "error");
+          badge.textContent = "오류";
+          badge.className =
+            "px-2 py-0.5 text-[10px] rounded bg-red-500/20 text-red-300 font-medium";
+        } finally {
+          btn.disabled = false;
+          btn.classList.remove("opacity-50", "cursor-not-allowed");
+        }
+      }
+    </script>
+  </body>
+</html>
