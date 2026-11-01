@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>키움증권 당일 데이터 단일 통합 JSON 다운로드</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+      body {
+        font-family:
+          "Inter",
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+      }
+    </style>
+  </head>
+  <body
+    class="bg-slate-900 text-slate-100 min-h-screen flex items-center justify-center p-4"
+  >
+    <!-- Main Container -->
+    <div
+      class="max-w-xl w-full bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl overflow-hidden"
+    >
+      <!-- Header -->
+      <div
+        class="bg-slate-800/80 p-6 border-b border-slate-700 flex items-center space-x-4"
+      >
+        <div
+          class="p-3 bg-red-600/20 border border-red-500/30 rounded-xl text-red-500"
+        >
+          <i data-lucide="layers" class="w-8 h-8"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold text-white">
+            키움증권 당일 데이터 단일 통합 추출기
+          </h1>
+          <p class="text-xs text-slate-400 mt-1">
+            대차거래 항목에만 _AL 부여 후 1개의 통합 JSON으로 추출
+          </p>
+        </div>
+      </div>
+
+      <!-- Main Content Body -->
+      <div class="p-6 space-y-6">
+        <!-- Execution Button -->
+        <div>
+          <button
+            id="runBtn"
+            onclick="executeUnifiedWorkflow()"
+            class="w-full py-4 px-6 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 active:scale-[0.99] text-white font-bold text-base rounded-xl shadow-lg shadow-red-900/30 transition-all flex items-center justify-center space-x-3 cursor-pointer"
+          >
+            <i data-lucide="download-cloud" class="w-5 h-5"></i>
+            <span>단일 통합 JSON 파일 다운로드</span>
+          </button>
+        </div>
+
+        <!-- Log / Status Box -->
+        <div
+          class="bg-slate-950 rounded-xl border border-slate-800 p-4 font-mono text-xs text-slate-300"
+        >
+          <div
+            class="flex items-center justify-between pb-2 mb-2 border-b border-slate-800"
+          >
+            <span
+              class="text-slate-400 font-semibold flex items-center space-x-2"
+            >
+              <i data-lucide="terminal" class="w-4 h-4 text-emerald-400"></i>
+              <span>실행 상태 로그</span>
+            </span>
+            <span
+              id="statusBadge"
+              class="px-2 py-0.5 text-[10px] rounded bg-slate-800 text-slate-400"
+              >대기 중</span
+            >
+          </div>
+          <div
+            id="logArea"
+            class="h-64 overflow-y-auto space-y-1.5 text-[11px] leading-relaxed"
+          >
+            <div class="text-slate-500">
+              버튼을 누르면 대차거래 종목코드에만 _AL을 덧붙인 후 4가지 수집
+              항목을 병합하여 단일 JSON으로 다운로드합니다.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script>
+      lucide.createIcons();
+
+      const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      function getOffsetDateStr(offsetDays = 0) {
+        const d = new Date();
+        d.setDate(d.getDate() - offsetDays);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${year}${month}${day}`;
+      }
+
+      function toSafeInt(val) {
+        if (val === undefined || val === null) return 0;
+        const cleanStr = String(val).replace(/[^0-9-]/g, "");
+        const parsed = parseInt(cleanStr, 10);
+        return isNaN(parsed) ? 0 : parsed;
+      }
+
+      function log(msg, type = "info") {
+        const logArea = document.getElementById("logArea");
+        const entry = document.createElement("div");
+        const now = new Date().toLocaleTimeString();
+
+        let color = "text-slate-300";
+        if (type === "error") color = "text-red-400 font-semibold";
+        if (type === "success") color = "text-emerald-400 font-semibold";
+        if (type === "warn") color = "text-amber-400";
+
+        entry.className = color;
+        entry.innerHTML = `<span class="text-slate-600">[${now}]</span> ${msg}`;
+        logArea.appendChild(entry);
+        logArea.scrollTop = logArea.scrollHeight;
+        console.log(msg);
+      }
+
+      function resetLog() {
+        document.getElementById("logArea").innerHTML = "";
+      }
+
+      // 1. 접근 토큰 발급
+      async function fetchToken(authParams) {
+        const url = "https://mockapi.kiwoom.com/oauth2/token";
+        log("🔑 접근 토큰 발급 요청 중...");
+
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json;charset=UTF-8" },
+          body: JSON.stringify(authParams),
+        });
+
+        const resBody = await response.json();
+        const code = resBody.return_code;
+        if (
+          code !== undefined &&
+          code !== 0 &&
+          code !== "0" &&
+          code !== "0000"
+        ) {
+          throw new Error(
+            resBody.return_msg || resBody.msg || "토큰 발급 실패",
+          );
+        }
+
+        const token = resBody.access_token || resBody.token;
+        if (!token) throw new Error("응답에 Access Token이 없습니다.");
+        log(" -> 토큰 발급 성공!", "success");
+        return token;
+      }
+
+      // 공통 키움 TR 요청 래퍼 함수
+      async function callKiwoomApi(
+        token,
+        endpoint,
+        apiId,
+        data,
+        contYn = "N",
+        nextKey = "",
+      ) {
+        const url = `https://mockapi.kiwoom.com${endpoint}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json;charset=UTF-8",
+            authorization: `Bearer ${token}`,
+            "cont-yn": contYn,
+            "next-key": nextKey,
+            "api-id": apiId,
+          },
+          body: JSON.stringify(data),
+        });
+
+        const resContYn =
+          response.headers.get("cont-yn") ||
+          response.headers.get("Cont-Yn") ||
+          "N";
+        const resNextKey =
+          response.headers.get("next-key") ||
+          response.headers.get("Next-Key") ||
+          "";
+        const resBody = await response.json();
+
+        return { body: resBody, contYn: resContYn, nextKey: resNextKey };
+      }
+
+      // 1. 당일대차거래상위 수집 (ka90012)
+      async function collectSlbData(token, mrktTpCode, mrktLabel, searchDate) {
+        let list = [];
+        let contYn = "N",
+          nextKey = "";
+        while (true) {
+          await delay(1200);
+          const res = await callKiwoomApi(
+            token,
+            "/api/dostk/slb",
+            "ka90012",
+            { mrkt_tp: mrktTpCode, dt: searchDate },
+            contYn,
+            nextKey,
+          );
+          const pageList = res.body.dbrt_trde_prps || [];
+          list = list.concat(
+            pageList.map((item) => ({
+              ...item,
+              dt: item.dt || searchDate,
+              mrkt_tp: mrktLabel,
+            })),
+          );
+          contYn = res.contYn;
+          nextKey = res.nextKey;
+          if (contYn !== "Y" || !nextKey) break;
+        }
+        return list;
+      }
+
+      // 2. 당일거래량상위 수집 (ka10030)
+      async function collectVolumeData(token, mrktTpCode, mrktLabel) {
+        let list = [];
+        let contYn = "N",
+          nextKey = "";
+        const baseParams = {
+          mrkt_tp: mrktTpCode,
+          sort_tp: "1",
+          mang_stk_incls: "0",
+          crd_tp: "0",
+          trde_qty_tp: "0",
+          pric_tp: "0",
+          trde_prica_tp: "0",
+          mrkt_open_tp: "0",
+          stex_tp: "3",
+        };
+        while (true) {
+          await delay(1200);
+          const res = await callKiwoomApi(
+            token,
+            "/api/dostk/rkinfo",
+            "ka10030",
+            baseParams,
+            contYn,
+            nextKey,
+          );
+          const pageList = res.body.tdy_trde_qty_upper || [];
+          list = list.concat(
+            pageList.map((item) => ({ ...item, mrkt_tp: mrktLabel })),
+          );
+          contYn = res.contYn;
+          nextKey = res.nextKey;
+          if (contYn !== "Y" || !nextKey) break;
+        }
+        return list;
+      }
+
+      // 3. 당일투자자별매매 수집 (ka10066)
+      async function collectInvestorData(token, mrktTpCode, mrktLabel) {
+        let list = [];
+        let contYn = "N",
+          nextKey = "";
+        const baseParams = {
+          mrkt_tp: mrktTpCode,
+          amt_qty_tp: "2",
+          trde_tp: "0",
+          stex_tp: "3",
+        };
+        while (true) {
+          await delay(1200);
+          const res = await callKiwoomApi(
+            token,
+            "/api/dostk/mrkcond",
+            "ka10066",
+            baseParams,
+            contYn,
+            nextKey,
+          );
+          const pageList = res.body.opaf_invsr_trde || [];
+          list = list.concat(
+            pageList.map((item) => ({ ...item, mrkt_tp: mrktLabel })),
+          );
+          contYn = res.contYn;
+          nextKey = res.nextKey;
+          if (contYn !== "Y" || !nextKey) break;
+        }
+        return list;
+      }
+
+      // 4. 당일프로그램상위 수집 (ka90004)
+      async function collectProgramData(
+        token,
+        mrktTpCode,
+        mrktLabel,
+        searchDate,
+      ) {
+        let list = [];
+        let contYn = "N",
+          nextKey = "";
+        const baseParams = {
+          mrkt_tp: mrktTpCode,
+          stex_tp: "3",
+          dt: searchDate,
+        };
+        while (true) {
+          await delay(1200);
+          const res = await callKiwoomApi(
+            token,
+            "/api/dostk/stkinfo",
+            "ka90004",
+            baseParams,
+            contYn,
+            nextKey,
+          );
+          const pageList = res.body.stk_prm_trde_prst || [];
+          list = list.concat(
+            pageList.map((item) => ({
+              ...item,
+              dt: item.dt || searchDate,
+              mrkt_tp: mrktLabel,
+            })),
+          );
+          contYn = res.contYn;
+          nextKey = res.nextKey;
+          if (contYn !== "Y" || !nextKey) break;
+        }
+        return list;
+      }
+
+      // ==========================================
+      // 데이터 병합 및 단일 JSON 생성
+      // ==========================================
+      function mergeAndDownloadSingleJSON(
+        slbList,
+        volumeList,
+        investorList,
+        programList,
+        validDate,
+      ) {
+        log("\n📊 수집된 데이터 병합 처리 중...");
+
+        const mergedMap = new Map();
+
+        // 헬퍼: 종목 데이터 객체 가져오기 (없으면 초기화 생성)
+        function getOrCreateItem(stkCdKey, mrktTp) {
+          const cleanCdKey = String(stkCdKey || "").trim();
+          if (!cleanCdKey) return null;
+
+          if (!mergedMap.has(cleanCdKey)) {
+            mergedMap.set(cleanCdKey, {
+              dt: validDate,
+              mrkt_tp: mrktTp || "",
+              stk_cd: cleanCdKey, // Key 자체를 stk_cd로 유지
+              cur_prc: 0,
+              trde_qty: 0,
+              ind_invsr: 0,
+              frgnr_invsr: 0,
+              orgn: 0,
+              fnnc_invt: 0,
+              insrnc: 0,
+              invtrt: 0,
+              etc_fnnc: 0,
+              bank: 0,
+              penfnd_etc: 0,
+              samo_fund: 0,
+              natn: 0,
+              etc_corp: 0,
+              net_cntr_qty_slb: 0,
+              net_cntr_qty_pgm: 0,
+            });
+          }
+          const item = mergedMap.get(cleanCdKey);
+          if (!item.mrkt_tp && mrktTp) item.mrkt_tp = mrktTp;
+          return item;
+        }
+
+        // 1. 대차 데이터 병합 (★ 대차거래 종목코드에만 _AL 접미사 부여)
+        slbList.forEach((item) => {
+          const slbStkCd = item.stk_cd
+            ? `${String(item.stk_cd).trim()}_AL`
+            : "";
+          const target = getOrCreateItem(slbStkCd, item.mrkt_tp);
+          if (target) {
+            const cntr = Math.abs(toSafeInt(item.dbrt_trde_cntrcnt));
+            const rpy = Math.abs(toSafeInt(item.dbrt_trde_rpy));
+            target.net_cntr_qty_slb = cntr - rpy;
+          }
+        });
+
+        // 2. 거래량 데이터 병합 (순수 stk_cd 사용)
+        volumeList.forEach((item) => {
+          const target = getOrCreateItem(item.stk_cd, item.mrkt_tp);
+          if (target) {
+            target.cur_prc = Math.abs(toSafeInt(item.cur_prc));
+            target.trde_qty = Math.abs(toSafeInt(item.trde_qty));
+          }
+        });
+
+        // 3. 투자자별 데이터 병합 (순수 stk_cd 사용)
+        investorList.forEach((item) => {
+          const target = getOrCreateItem(item.stk_cd, item.mrkt_tp);
+          if (target) {
+            target.ind_invsr = toSafeInt(item.ind_invsr);
+            target.frgnr_invsr = toSafeInt(item.frgnr_invsr);
+            target.orgn = toSafeInt(item.orgn);
+            target.fnnc_invt = toSafeInt(item.fnnc_invt);
+            target.insrnc = toSafeInt(item.insrnc);
+            target.invtrt = toSafeInt(item.invtrt);
+            target.etc_fnnc = toSafeInt(item.etc_fnnc);
+            target.bank = toSafeInt(item.bank);
+            target.penfnd_etc = toSafeInt(item.penfnd_etc);
+            target.samo_fund = toSafeInt(item.samo_fund);
+            target.natn = toSafeInt(item.natn);
+            target.etc_corp = toSafeInt(item.etc_corp);
+          }
+        });
+
+        // 4. 프로그램 데이터 병합 (순수 stk_cd 사용)
+        programList.forEach((item) => {
+          const target = getOrCreateItem(item.stk_cd, item.mrkt_tp);
+          if (target) {
+            let rawNetQty = item.net_cntr_qty ?? item.prm_netprps_qty;
+            if (rawNetQty === undefined || rawNetQty === null) {
+              rawNetQty =
+                toSafeInt(item.buy_cntr_qty) - toSafeInt(item.sel_cntr_qty);
+            }
+            target.net_cntr_qty_pgm = toSafeInt(rawNetQty);
+          }
+        });
+
+        // Map의 항목들을 배열로 추출
+        const resultArray = Array.from(mergedMap.values());
+
+        // JSON 문자열 생성 (보기 쉽게 들여쓰기 2칸 적용)
+        const jsonContent = JSON.stringify(resultArray, null, 2);
+        const blob = new Blob([jsonContent], {
+          type: "application/json;charset=utf-8;",
+        });
+        const fileName = `${validDate}_당일통합데이터.json`;
+        const url = URL.createObjectURL(blob);
+
+        const link = document.createElement("a");
+        link.href = url;
+        link.setAttribute("download", fileName);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        log(
+          ` -> 📄 단일 통합 JSON 파일 생성 성공: [${fileName}] (총 ${resultArray.length}건)`,
+          "success",
+        );
+      }
+
+      // ==========================================
+      // 워크플로우 통합 실행 함수
+      // ==========================================
+      async function executeUnifiedWorkflow() {
+        const btn = document.getElementById("runBtn");
+        const badge = document.getElementById("statusBadge");
+
+        btn.disabled = true;
+        btn.classList.add("opacity-50", "cursor-not-allowed");
+        badge.textContent = "처리 중";
+        badge.className =
+          "px-2 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-300 font-medium";
+
+        resetLog();
+
+        try {
+          const authParams = {
+            grant_type: "client_credentials",
+            appkey: "6C5DEgrFBmeUtnQ6dwYFazZ_Aa3Tdia3agcS6rTkmic",
+            secretkey: "xl5sKBl168QCieYJHAW7IgI-aefHGlD4txRCts-__CM",
+          };
+
+          const token = await fetchToken(authParams);
+
+          let slbList = [];
+          let validDate = "";
+          const MAX_RETRIES = 10;
+
+          // 1. 유효 거래일 탐색 및 대차거래 수집
+          log("\n--- [1/4] 당일대차거래상위 탐색 및 수집 ---", "warn");
+          for (let offset = 0; offset < MAX_RETRIES; offset++) {
+            const searchDate = getOffsetDateStr(offset);
+            log(`🔍 [시도 ${offset + 1}] 거래일 탐색: ${searchDate}`);
+
+            const kospiSlb = await collectSlbData(
+              token,
+              "P00101",
+              "k",
+              searchDate,
+            );
+            const kosdaqSlb = await collectSlbData(
+              token,
+              "P10102",
+              "q",
+              searchDate,
+            );
+            const currentSlb = kospiSlb.concat(kosdaqSlb);
+
+            if (currentSlb.length > 0) {
+              slbList = currentSlb;
+              validDate = searchDate;
+              log(
+                ` -> 🎉 유효 거래일 발견 [${validDate}]: 대차 데이터 ${slbList.length}건`,
+                "success",
+              );
+              break;
+            } else {
+              log(
+                ` -> [${searchDate}] 데이터 0건 (휴일/장마감 전). 이전 날짜 탐색...`,
+                "warn",
+              );
+            }
+          }
+
+          if (!validDate || slbList.length === 0) {
+            throw new Error("최근 10일간 유효 거래 데이터를 찾을 수 없습니다.");
+          }
+
+          // 2. 당일거래량상위 수집
+          log("\n--- [2/4] 당일거래량상위 수집 ---", "warn");
+          const kospiVol = await collectVolumeData(token, "001", "k");
+          const kosdaqVol = await collectVolumeData(token, "101", "q");
+          const volumeList = kospiVol.concat(kosdaqVol);
+          log(` -> 거래량상위 수집 완료: 총 ${volumeList.length}건`, "success");
+
+          // 3. 당일투자자별매매 수집
+          log("\n--- [3/4] 당일투자자별매매 수집 ---", "warn");
+          const kospiInv = await collectInvestorData(token, "001", "k");
+          const kosdaqInv = await collectInvestorData(token, "101", "q");
+          const investorList = kospiInv.concat(kosdaqInv);
+          log(
+            ` -> 투자자별매매 수집 완료: 총 ${investorList.length}건`,
+            "success",
+          );
+
+          // 4. 당일프로그램상위 수집
+          log("\n--- [4/4] 당일프로그램상위 수집 ---", "warn");
+          const kospiPgm = await collectProgramData(
+            token,
+            "P00101",
+            "k",
+            validDate,
+          );
+          const kosdaqPgm = await collectProgramData(
+            token,
+            "P10102",
+            "q",
+            validDate,
+          );
+          const programList = kospiPgm.concat(kosdaqPgm);
+          log(
+            ` -> 프로그램상위 수집 완료: 총 ${programList.length}건`,
+            "success",
+          );
+
+          // 5. 단일 JSON으로 통합 병합 및 저장
+          log("\n--- [5/5] 단일 JSON 병합 및 저장 ---", "warn");
+          mergeAndDownloadSingleJSON(
+            slbList,
+            volumeList,
+            investorList,
+            programList,
+            validDate,
+          );
+
+          badge.textContent = "완료";
+          badge.className =
+            "px-2 py-0.5 text-[10px] rounded bg-emerald-500/20 text-emerald-300 font-medium";
+          log("\n✨ 단일 통합 JSON 파일 다운로드가 완료되었습니다!", "success");
+        } catch (err) {
+          log(`오류가 발생했습니다: ${err.message}`, "error");
+          badge.textContent = "오류";
+          badge.className =
+            "px-2 py-0.5 text-[10px] rounded bg-red-500/20 text-red-300 font-medium";
+        } finally {
+          btn.disabled = false;
+          btn.classList.remove("opacity-50", "cursor-not-allowed");
+        }
+      }
+    </script>
+  </body>
+</html>
